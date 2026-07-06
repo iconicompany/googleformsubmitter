@@ -3,6 +3,8 @@ import Ajv from 'ajv';
 import fs from 'fs/promises';
 import path from 'path';
 import type { FormSchemaMapping, SubmissionResult } from './types';
+import { GoogleAuthService } from './GoogleAuthService';
+import { GoogleDriveService } from './GoogleDriveService';
 
 const ajv = new Ajv({ allErrors: true });
 
@@ -15,7 +17,8 @@ export class GoogleFormSubmitter {
   private entryIdCache: Record<string, string> | null = null;
   private validateFn: ReturnType<typeof ajv.compile>;
   private cookies?: Array<any>;
-  private credentialsDir: string;
+  private authService: GoogleAuthService;
+  private driveService: GoogleDriveService;
 
   constructor(options: {
     formUrl: string;
@@ -31,8 +34,11 @@ export class GoogleFormSubmitter {
     this.mappingSchema = options.mappingSchema;
     this.cdpUrl = options.cdpUrl || 'ws://127.0.0.1:9222/';
     this.cookies = options.cookies;
-    this.credentialsDir = options.credentialsDir || path.join(process.cwd(), '.data');
-    
+
+    const credentialsDir = options.credentialsDir || path.join(process.cwd(), '.data');
+    this.authService = new GoogleAuthService(credentialsDir);
+    this.driveService = new GoogleDriveService(this.authService);
+
     // Compile JSON Schema validation function
     this.validateFn = ajv.compile(this.jsonSchema);
 
@@ -114,24 +120,19 @@ export class GoogleFormSubmitter {
             }
           }
 
-          // Strategy B: Parse from data-params if Strategy A fails
+          // Strategy B: Parse data-params attribute in container or child elements
           if (!entryId) {
-            let dataParams = container.getAttribute('data-params') || '';
-            if (!dataParams) {
-              const el = container.querySelector('[data-params]');
-              if (el) {
-                dataParams = el.getAttribute('data-params') || '';
-              }
-            }
-            if (dataParams) {
-              const match = dataParams.match(/\[\[(\d+)/);
+            const paramsEl = container.hasAttribute('data-params') ? container : container.querySelector('[data-params]');
+            if (paramsEl) {
+              const dataParams = paramsEl.getAttribute('data-params');
+              const match = dataParams?.match(/\[\[(\d+)/);
               if (match && match[1]) {
                 entryId = match[1];
               }
             }
           }
 
-          if (labelText && entryId) {
+          if (entryId) {
             result[labelText] = entryId;
           }
         });
@@ -139,26 +140,13 @@ export class GoogleFormSubmitter {
         return result;
       });
 
-      // 3. Map mappingSchema properties to resolved entry IDs
+      console.log(`[GoogleFormSubmitter] Discovered ${Object.keys(domMappings).length} fields in Form DOM.`);
+
+      // 3. Map properties from mappingSchema to Google Forms entryIds
       const resolvedCache: Record<string, string> = {};
       for (const [propName, fieldMapping] of Object.entries(this.mappingSchema)) {
-        // Try finding a match in the scraped titles
-        let matchedEntryId: string | undefined = undefined;
-
-        // Try exact match first
-        matchedEntryId = domMappings[fieldMapping.label];
-
-        // Try substring match as fallback
-        if (!matchedEntryId) {
-          const lowerLabel = fieldMapping.label.toLowerCase();
-          const scrapedTitle = Object.keys(domMappings).find(
-            (t) => t.toLowerCase().includes(lowerLabel) || lowerLabel.includes(t.toLowerCase())
-          );
-          if (scrapedTitle) {
-            matchedEntryId = domMappings[scrapedTitle];
-          }
-        }
-
+        // Find matching entryId by label
+        const matchedEntryId = domMappings[fieldMapping.label];
         if (matchedEntryId) {
           resolvedCache[propName] = matchedEntryId;
         } else {
@@ -197,78 +185,6 @@ export class GoogleFormSubmitter {
     if (await page.locator('.Qr7Oae').count() === 0) {
       throw new Error('Could not find question containers on the page.');
     }
-  }
-
-  /**
-   * Resolves Google Auth OAuth2 Client using credentials.json and forms-auth.json.
-   */
-  private async getGoogleAuthClient(): Promise<any> {
-    const searchDirs = [this.credentialsDir];
-    if (this.credentialsDir === path.join(process.cwd(), '.data')) {
-      searchDirs.push(path.join(process.cwd(), '..', '.data'));
-    }
-
-    let tokenPath = '';
-    let credentialsPath = '';
-
-    for (const dir of searchDirs) {
-      const t = path.join(dir, 'forms-auth.json');
-      const c = path.join(dir, 'credentials.json');
-      try {
-        await fs.access(t);
-        tokenPath = t;
-      } catch {}
-      try {
-        await fs.access(c);
-        credentialsPath = c;
-      } catch {}
-      if (tokenPath && credentialsPath) break;
-    }
-
-    if (!tokenPath || !credentialsPath) {
-      throw new Error(`[GoogleFormSubmitter] Google Forms/Drive OAuth credentials (forms-auth.json, credentials.json) not found in directories: ${searchDirs.join(', ')}`);
-    }
-
-    const { google } = await import('googleapis');
-    const content = await fs.readFile(tokenPath, 'utf-8');
-    const credentials = JSON.parse(content);
-    
-    const oauth2Client = new google.auth.OAuth2(
-      credentials.client_id,
-      credentials.client_secret
-    );
-    oauth2Client.setCredentials({ refresh_token: credentials.refresh_token });
-    
-    // Refresh access token if needed
-    await oauth2Client.getAccessToken();
-    return oauth2Client;
-  }
-
-  /**
-   * Uploads a file buffer directly to Google Drive.
-   */
-  private async uploadToDrive(filename: string, mimeType: string, buffer: Buffer): Promise<string> {
-    const auth = await this.getGoogleAuthClient();
-    const { google } = await import('googleapis');
-    const drive = google.drive({ version: 'v3', auth });
-    
-    const { Readable } = await import('stream');
-    const response = await drive.files.create({
-      requestBody: {
-        name: filename
-      },
-      media: {
-        mimeType,
-        body: Readable.from(buffer)
-      },
-      fields: 'id'
-    });
-
-    const id = response.data.id;
-    if (!id) {
-      throw new Error('[GoogleFormSubmitter] Failed to upload file to Google Drive: response did not contain file ID');
-    }
-    return id;
   }
 
   /**
@@ -314,7 +230,7 @@ export class GoogleFormSubmitter {
           let fileId = value.fileId;
           if (!fileId && value.buffer) {
             console.log(`[GoogleFormSubmitter] File buffer detected. Uploading "${value.filename}" to Google Drive...`);
-            fileId = await this.uploadToDrive(value.filename, value.mimeType, value.buffer);
+            fileId = await this.driveService.uploadFile(value.filename, value.mimeType, value.buffer);
           }
           if (fileId) {
             const filePayload = [[[fileId, value.filename, value.mimeType]]];
@@ -384,34 +300,38 @@ export class GoogleFormSubmitter {
         }
 
         for (const [entryId, values] of Object.entries(fieldsMap)) {
-          for (const val of values as string[]) {
+          const list = values as string[];
+          for (const val of list) {
             searchParams.append(`entry.${entryId}`, val);
           }
         }
 
-        const actionUrl = form.action || g.location.href.replace('/viewform', '/formResponse');
-        
-        const res = await g.fetch(actionUrl, {
+        const actionUrl = form.getAttribute('action') || '';
+        const resolvedActionUrl = new URL(actionUrl, window.location.href).href;
+
+        console.log(`Sending POST to ${resolvedActionUrl}...`);
+        const response = await g.fetch(resolvedActionUrl, {
           method: 'POST',
-          body: searchParams,
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded'
-          }
+          },
+          body: searchParams.toString()
         });
 
         return {
-          status: res.status,
-          text: await res.text()
+          status: response.status,
+          url: response.url,
+          bodyText: await response.text()
         };
       }, { fieldsMap });
 
-      const isSuccess = responseInfo.status === 200 || responseInfo.text.includes('v-confirmation-msg') || responseInfo.text.toLowerCase().includes('confirmation');
+      const success = responseInfo.status === 200;
 
       return {
-        success: isSuccess,
+        success,
         statusCode: responseInfo.status,
-        message: isSuccess ? 'Form submitted successfully!' : 'Google Form rejected submission.',
-        fieldsSubmitted,
+        message: success ? 'Form submitted successfully' : `Server responded with status ${responseInfo.status}`,
+        fieldsSubmitted
       };
     } finally {
       await context.close();
