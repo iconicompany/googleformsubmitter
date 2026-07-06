@@ -1,0 +1,31 @@
+diff --git a/lib/coreBundle.js b/lib/coreBundle.js
+index 7d8468fd89fd4d292eade471c36e757c23cbec44..6540f61c85efbb3e14d02cd06400750ed754731b 100644
+--- a/lib/coreBundle.js
++++ b/lib/coreBundle.js
+@@ -38873,7 +38873,7 @@ var init_transport = __esm({
+     "use strict";
+     init_happyEyeballs();
+     init_task();
+-    ws = require("./utilsBundle").ws;
++    ws = "Bun" in globalThis ? require(require.resolve("ws", { paths: ["/"] })) : require("./utilsBundle").ws;
+     perMessageDeflate2 = {
+       clientNoContextTakeover: true,
+       zlibDeflateOptions: {
+@@ -49404,7 +49404,7 @@ var init_wvBrowser = __esm({
+     init_dialogBridge();
+     init_wvConnection();
+     init_wvPage();
+-    ws2 = require("./utilsBundle").ws;
++    ws2 = "Bun" in globalThis ? require(require.resolve("ws", { paths: ["/"] })) : require("./utilsBundle").ws;
+     DeferredWebSocketTransport = class {
+       constructor(url2, headers) {
+         this._closed = false;
+@@ -71153,7 +71153,7 @@ var init_cdpRelay = __esm({
+     init_cdpRelayV2();
+     init_protocol();
+     debug15 = require("./utilsBundle").debug;
+-    ws3 = require("./utilsBundle").ws;
++    ws3 = "Bun" in globalThis ? require(require.resolve("ws", { paths: ["/"] })) : require("./utilsBundle").ws;
+     ({ wsServer: wsServer3 } = require("./utilsBundle"));
+     debugLogger2 = debug15("pw:mcp:relay");
+     CDPRelayServer = class {
