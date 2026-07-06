@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { Readable } from 'stream';
-import type { GoogleAuthService } from './GoogleAuthService';
+import type { GoogleAuthService } from './google-auth-service';
 
 export class GoogleDriveService {
   private authService: GoogleAuthService;

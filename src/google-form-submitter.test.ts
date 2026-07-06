@@ -83,13 +83,19 @@ describe('GoogleFormSubmitter E2E Integration', () => {
     }
 
     const formUrl = 'https://docs.google.com/forms/d/e/1FAIpQLSc1aiEAhxWCMSNjZ1asGDtXV_mT8vTiJRquiqfdjsoMkKT9tw/viewform';
+    const credentialsPath = path.join(__dirname, '..', '..', 'imatching', '.data', 'credentials.json');
+    const tokenPath = path.join(__dirname, '..', '..', 'imatching', '.data', 'forms-auth.json');
+
     submitter = new GoogleFormSubmitter({
       formUrl,
       jsonSchema,
       mappingSchema,
       cdpUrl: 'ws://127.0.0.1:9222/', // CDP endpoint to Lightpanda
       cacheDir: './.data',
-      credentialsDir: path.join(__dirname, '..', '..', 'imatching', '.data'),
+      auth: {
+        credentialsPath,
+        tokenPath
+      },
       cookies
     });
   });

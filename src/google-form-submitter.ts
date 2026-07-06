@@ -27,7 +27,6 @@ export class GoogleFormSubmitter {
     cdpUrl?: string;
     cacheDir?: string;
     cookies?: Array<any>;
-    credentialsDir?: string;
     auth?: GoogleAuthOptions;
   }) {
     this.formUrl = options.formUrl;
@@ -36,8 +35,7 @@ export class GoogleFormSubmitter {
     this.cdpUrl = options.cdpUrl || 'ws://127.0.0.1:9222/';
     this.cookies = options.cookies;
 
-    const credentialsDir = options.credentialsDir || path.join(process.cwd(), '.data');
-    this.authService = new GoogleAuthService(credentialsDir, options.auth);
+    this.authService = new GoogleAuthService(options.auth);
     this.driveService = new GoogleDriveService(this.authService);
 
     // Compile JSON Schema validation function
@@ -47,7 +45,7 @@ export class GoogleFormSubmitter {
     const formIdMatch = this.formUrl.match(/\/d\/e\/([a-zA-Z0-9_-]+)/) || this.formUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
     const formHash = formIdMatch ? formIdMatch[1] : Buffer.from(this.formUrl).toString('base64').substring(0, 16);
     
-    const cacheDir = options.cacheDir || path.join(process.cwd(), '.data');
+    const cacheDir = options.cacheDir || process.cwd();
     this.cacheFilePath = path.join(cacheDir, `form-cache-${formHash}.json`);
   }
 
