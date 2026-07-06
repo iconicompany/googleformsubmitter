@@ -9,7 +9,8 @@
     "test": "bun test",
     "lint": "oxlint",
     "validate": "tsgo --noEmit",
-    "create-form": "bun run ./tools/create-form.ts"
+    "create-form": "bun run ./tools/create-form.ts",
+    "introspect-form": "bun run ./tools/introspect-form.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
