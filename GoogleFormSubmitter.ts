@@ -15,6 +15,7 @@ export class GoogleFormSubmitter {
   private entryIdCache: Record<string, string> | null = null;
   private validateFn: ReturnType<typeof ajv.compile>;
   private cookies?: Array<any>;
+  private credentialsDir: string;
 
   constructor(options: {
     formUrl: string;
@@ -23,12 +24,14 @@ export class GoogleFormSubmitter {
     cdpUrl?: string;
     cacheDir?: string;
     cookies?: Array<any>;
+    credentialsDir?: string;
   }) {
     this.formUrl = options.formUrl;
     this.jsonSchema = options.jsonSchema;
     this.mappingSchema = options.mappingSchema;
     this.cdpUrl = options.cdpUrl || 'ws://127.0.0.1:9222/';
     this.cookies = options.cookies;
+    this.credentialsDir = options.credentialsDir || path.join(process.cwd(), '.data');
     
     // Compile JSON Schema validation function
     this.validateFn = ajv.compile(this.jsonSchema);
@@ -83,13 +86,13 @@ export class GoogleFormSubmitter {
 
     try {
       await page.goto(this.formUrl);
-      // Wait for fields to load
-      await page.locator('.Qr7Oae').first().waitFor({ state: 'attached', timeout: 15000 });
+      // Wait for page load and check if form is closed
+      await this.checkClosedAndGetPage(page);
 
       // Scan DOM for question containers
       const domMappings = await page.evaluate(() => {
         const result: Record<string, string> = {};
-        const containers = document.querySelectorAll('.Qr7Oae');
+        const containers = (globalThis as any).document.querySelectorAll('.Qr7Oae');
 
         containers.forEach((container: any) => {
           const headerEl = container.querySelector('[role="heading"], .M7eMe, .HoRgec');
@@ -177,6 +180,98 @@ export class GoogleFormSubmitter {
   }
 
   /**
+   * Safe check to determine if the form is closed, throwing a clear error instead of timing out.
+   */
+  private async checkClosedAndGetPage(page: any): Promise<void> {
+    await Promise.any([
+      page.locator('.Qr7Oae').first().waitFor({ state: 'attached', timeout: 15000 }),
+      page.waitForURL(/\/closedform/, { timeout: 15000 }).catch(() => {})
+    ]).catch(() => {});
+
+    const isClosed = page.url().includes('/closedform') || (await page.locator('form').count() === 0);
+
+    if (isClosed) {
+      throw new Error('Google Form is closed (no longer accepting responses)');
+    }
+
+    if (await page.locator('.Qr7Oae').count() === 0) {
+      throw new Error('Could not find question containers on the page.');
+    }
+  }
+
+  /**
+   * Resolves Google Auth OAuth2 Client using credentials.json and forms-auth.json.
+   */
+  private async getGoogleAuthClient(): Promise<any> {
+    const searchDirs = [this.credentialsDir];
+    if (this.credentialsDir === path.join(process.cwd(), '.data')) {
+      searchDirs.push(path.join(process.cwd(), '..', '.data'));
+    }
+
+    let tokenPath = '';
+    let credentialsPath = '';
+
+    for (const dir of searchDirs) {
+      const t = path.join(dir, 'forms-auth.json');
+      const c = path.join(dir, 'credentials.json');
+      try {
+        await fs.access(t);
+        tokenPath = t;
+      } catch {}
+      try {
+        await fs.access(c);
+        credentialsPath = c;
+      } catch {}
+      if (tokenPath && credentialsPath) break;
+    }
+
+    if (!tokenPath || !credentialsPath) {
+      throw new Error(`[GoogleFormSubmitter] Google Forms/Drive OAuth credentials (forms-auth.json, credentials.json) not found in directories: ${searchDirs.join(', ')}`);
+    }
+
+    const { google } = await import('googleapis');
+    const content = await fs.readFile(tokenPath, 'utf-8');
+    const credentials = JSON.parse(content);
+    
+    const oauth2Client = new google.auth.OAuth2(
+      credentials.client_id,
+      credentials.client_secret
+    );
+    oauth2Client.setCredentials({ refresh_token: credentials.refresh_token });
+    
+    // Refresh access token if needed
+    await oauth2Client.getAccessToken();
+    return oauth2Client;
+  }
+
+  /**
+   * Uploads a file buffer directly to Google Drive.
+   */
+  private async uploadToDrive(filename: string, mimeType: string, buffer: Buffer): Promise<string> {
+    const auth = await this.getGoogleAuthClient();
+    const { google } = await import('googleapis');
+    const drive = google.drive({ version: 'v3', auth });
+    
+    const { Readable } = await import('stream');
+    const response = await drive.files.create({
+      requestBody: {
+        name: filename
+      },
+      media: {
+        mimeType,
+        body: Readable.from(buffer)
+      },
+      fields: 'id'
+    });
+
+    const id = response.data.id;
+    if (!id) {
+      throw new Error('[GoogleFormSubmitter] Failed to upload file to Google Drive: response did not contain file ID');
+    }
+    return id;
+  }
+
+  /**
    * Validates input data and submits the form via direct HTTP POST.
    */
   public async submit(data: unknown): Promise<SubmissionResult> {
@@ -186,7 +281,7 @@ export class GoogleFormSubmitter {
       const errorMsg = this.validateFn.errors
         ?.map((err) => `${err.instancePath} ${err.message}`)
         .join(', ');
-      throw new Error(`Validation failed: ${errorMsg}`);
+      throw new Error("Validation failed: " + errorMsg);
     }
 
     const typedData = data as Record<string, any>;
@@ -215,11 +310,18 @@ export class GoogleFormSubmitter {
       const currentList = fieldsMap[entryId];
 
       if (fieldMapping.type === 'file') {
-        if (value && typeof value === 'object' && 'fileId' in value) {
-          const filePayload = [[[value.fileId, value.filename, value.mimeType]]];
-          const serialized = JSON.stringify(filePayload);
-          currentList?.push(serialized);
-          fieldsSubmitted[fieldMapping.label] = serialized;
+        if (value && typeof value === 'object' && ('fileId' in value || 'buffer' in value)) {
+          let fileId = value.fileId;
+          if (!fileId && value.buffer) {
+            console.log(`[GoogleFormSubmitter] File buffer detected. Uploading "${value.filename}" to Google Drive...`);
+            fileId = await this.uploadToDrive(value.filename, value.mimeType, value.buffer);
+          }
+          if (fileId) {
+            const filePayload = [[[fileId, value.filename, value.mimeType]]];
+            const serialized = JSON.stringify(filePayload);
+            currentList?.push(serialized);
+            fieldsSubmitted[fieldMapping.label] = serialized;
+          }
         }
       } else if (fieldMapping.type === 'choice' && fieldMapping.allowOther && value) {
         const isPredefined = fieldMapping.options?.choices?.includes(value);
@@ -264,7 +366,7 @@ export class GoogleFormSubmitter {
 
     try {
       await page.goto(this.formUrl);
-      await page.locator('.Qr7Oae').first().waitFor({ state: 'attached', timeout: 15000 });
+      await this.checkClosedAndGetPage(page);
 
       console.log(`[GoogleFormSubmitter] Sending HTTP POST request in page context...`);
       const responseInfo = await page.evaluate(async ({ fieldsMap }) => {
