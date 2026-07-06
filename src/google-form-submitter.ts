@@ -2,9 +2,9 @@ import { chromium } from 'playwright';
 import Ajv from 'ajv';
 import fs from 'fs/promises';
 import path from 'path';
-import type { FormSchemaMapping, SubmissionResult } from './types';
-import { GoogleAuthService } from './GoogleAuthService';
-import { GoogleDriveService } from './GoogleDriveService';
+import type { FormSchemaMapping, SubmissionResult, GoogleAuthOptions } from './types';
+import { GoogleAuthService } from './google-auth-service';
+import { GoogleDriveService } from './google-drive-service';
 
 const ajv = new Ajv({ allErrors: true });
 
@@ -28,6 +28,7 @@ export class GoogleFormSubmitter {
     cacheDir?: string;
     cookies?: Array<any>;
     credentialsDir?: string;
+    auth?: GoogleAuthOptions;
   }) {
     this.formUrl = options.formUrl;
     this.jsonSchema = options.jsonSchema;
@@ -36,7 +37,7 @@ export class GoogleFormSubmitter {
     this.cookies = options.cookies;
 
     const credentialsDir = options.credentialsDir || path.join(process.cwd(), '.data');
-    this.authService = new GoogleAuthService(credentialsDir);
+    this.authService = new GoogleAuthService(credentialsDir, options.auth);
     this.driveService = new GoogleDriveService(this.authService);
 
     // Compile JSON Schema validation function
@@ -307,7 +308,7 @@ export class GoogleFormSubmitter {
         }
 
         const actionUrl = form.getAttribute('action') || '';
-        const resolvedActionUrl = new URL(actionUrl, window.location.href).href;
+        const resolvedActionUrl = new URL(actionUrl, g.location.href).href;
 
         console.log(`Sending POST to ${resolvedActionUrl}...`);
         const response = await g.fetch(resolvedActionUrl, {

@@ -16,3 +16,11 @@ export interface SubmissionResult {
   message?: string;
   fieldsSubmitted: Record<string, string>;
 }
+
+export interface GoogleAuthOptions {
+  clientId?: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  credentialsPath?: string;
+  tokenPath?: string;
+}
