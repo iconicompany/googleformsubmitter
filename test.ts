@@ -21,10 +21,11 @@ const jsonSchema = {
       type: 'object',
       properties: {
         fileId: { type: 'string' },
+        buffer: { type: 'object' },
         filename: { type: 'string' },
         mimeType: { type: 'string' }
       },
-      required: ['fileId', 'filename', 'mimeType']
+      required: ['filename', 'mimeType']
     },
     company: { type: 'string' },
     checklist: { type: 'string' },
@@ -70,7 +71,7 @@ async function run() {
 
   // Load cookies from local scratch path if it exists
   let cookies: any[] = [];
-  const localCookiesPath = path.join(__dirname, '..', 'scratch', 'playwright-submit', 'google-cookies.json');
+  const localCookiesPath = process.env.GOOGLE_COOKIES_PATH || path.join(__dirname, '.data', 'google-cookies.json');
   try {
     const cookiesStr = await fs.readFile(localCookiesPath, 'utf8');
     cookies = JSON.parse(cookiesStr);
@@ -87,6 +88,7 @@ async function run() {
     mappingSchema,
     cdpUrl: 'ws://127.0.0.1:9222/', // CDP endpoint to Lightpanda
     cacheDir: './.data',
+    credentialsDir: path.join(__dirname, '..', 'imatching', '.data'),
     cookies
   });
 
@@ -103,7 +105,7 @@ async function run() {
     vacation: 'нет',
     inStaff: 'Да', // Standard predefined value
     cvFile: {
-      fileId: '1BRVwwPlohb_4g7DUZ3HTzHTwe6yQz2f7', // Real Drive File ID from earlier successful run
+      buffer: Buffer.from('mock cv file contents for integration test'),
       filename: 'cv_Багманов_Алмаз.docx',
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     },
