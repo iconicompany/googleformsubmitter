@@ -84,7 +84,7 @@ describe('GoogleFormSubmitter E2E Integration', () => {
 
     const formUrl = 'https://docs.google.com/forms/d/e/1FAIpQLSc1aiEAhxWCMSNjZ1asGDtXV_mT8vTiJRquiqfdjsoMkKT9tw/viewform';
     const credentialsPath = path.join(__dirname, '..', '..', 'imatching', '.data', 'credentials.json');
-    const tokenPath = path.join(__dirname, '..', '..', 'imatching', '.data', 'forms-auth.json');
+    const tokenPath = path.join(__dirname, '..', '..', 'imatching', '.data', 'gdrive-auth.json');
 
     submitter = new GoogleFormSubmitter({
       formUrl,
