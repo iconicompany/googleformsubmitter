@@ -5,6 +5,10 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iconicompany/googleformsubmitter.git"
+  },
   "scripts": {
     "test": "bun test",
     "lint": "oxlint",
