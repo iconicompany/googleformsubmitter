@@ -337,4 +337,32 @@ export class GoogleFormSubmitter {
       await browser.close();
     }
   }
+
+  /**
+   * Helper to format submitted fields or raw payload into a clean, human-readable list.
+   */
+  public static formatFields(fields: Record<string, any>): string {
+    const formatValue = (val: any): string => {
+      if (typeof val === 'string') {
+        if (val.startsWith('[[[') && val.endsWith(']]]')) {
+          try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed) && parsed[0]?.[0]?.[1]) {
+              return parsed[0][0][1];
+            }
+          } catch {}
+        }
+        return val;
+      }
+      if (val === null || val === undefined) {
+        return '—';
+      }
+      return String(val);
+    };
+
+    return Object.entries(fields)
+      .map(([key, val]) => `• ${key}: ${formatValue(val)}`)
+      .join('\n');
+  }
 }
+

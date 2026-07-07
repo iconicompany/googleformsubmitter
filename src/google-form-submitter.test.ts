@@ -103,10 +103,10 @@ describe('GoogleFormSubmitter E2E Integration', () => {
   test('should dynamically resolve fields, upload file, and submit successfully', async () => {
     const candidateData = {
       requestId: '910',
-      fullName: 'Багманов Алмаз (Схема)',
+      fullName: 'Тестов Тест (Схема)',
       birthDate: '1996-07-03',
       grade: 'Middle',
-      location: 'Россия, Набережные Челны',
+      location: 'Россия, Москва',
       rate: '2000',
       nds: 'Нет',
       exitDate: 'через 21 дней',
@@ -114,7 +114,7 @@ describe('GoogleFormSubmitter E2E Integration', () => {
       inStaff: 'Да',
       cvFile: {
         buffer: Buffer.from('mock cv file contents for integration test'),
-        filename: 'cv_Багманов_Алмаз.docx',
+        filename: 'cv_Тестов_Тест.docx',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       },
       company: 'Iconicompany',
@@ -130,7 +130,7 @@ describe('GoogleFormSubmitter E2E Integration', () => {
     expect(result1.statusCode).toBe(200);
 
     console.log('\n--- SECOND RUN: Submitting instantly using cache ---');
-    candidateData.fullName = 'Багманов Алмаз (Схема-Кэш)';
+    candidateData.fullName = 'Тестов Тест (Схема-Кэш)';
     const result2 = await submitter.submit(candidateData);
     console.log('Result 2 Fields Submitted:', JSON.stringify(result2.fieldsSubmitted, null, 2));
 
@@ -138,3 +138,36 @@ describe('GoogleFormSubmitter E2E Integration', () => {
     expect(result2.statusCode).toBe(200);
   }, 45000); // 45 seconds timeout
 });
+
+describe('GoogleFormSubmitter.formatFields Unit Tests', () => {
+  test('should format simple text and choice fields correctly', () => {
+    const fields = {
+      'Номер запроса': '917',
+      'ФИО (полностью)': 'Иванов Иван Иванович',
+      'Грейд': 'middle'
+    };
+    const formatted = GoogleFormSubmitter.formatFields(fields);
+    expect(formatted).toContain('• Номер запроса: 917');
+    expect(formatted).toContain('• ФИО (полностью): Иванов Иван Иванович');
+    expect(formatted).toContain('• Грейд: middle');
+  });
+
+  test('should parse nested CV array and display only the filename', () => {
+    const fields = {
+      'CV (файл)': '[[["1Nrch5iArW-Gx-Vz4x9YlAM6FuhI5tEtt","cv_Иванов_Иван_Иванович.docx","application/vnd.openxmlformats-officedocument.wordprocessingml.document"]]]'
+    };
+    const formatted = GoogleFormSubmitter.formatFields(fields);
+    expect(formatted).toBe('• CV (файл): cv_Иванов_Иван_Иванович.docx');
+  });
+
+  test('should handle empty/null/undefined values gracefully', () => {
+    const fields = {
+      'Комментарий': null,
+      'Ближайший планируемый отпуск': undefined
+    };
+    const formatted = GoogleFormSubmitter.formatFields(fields);
+    expect(formatted).toContain('• Комментарий: —');
+    expect(formatted).toContain('• Ближайший планируемый отпуск: —');
+  });
+});
+
