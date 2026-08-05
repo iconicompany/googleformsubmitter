@@ -17,9 +17,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # npm@latest refuses to install on Node 20 since npm 12 ("Required: ^22.22.2 ||
+          # ^24.15.0 || >=26.0.0"), which failed the publish outright.
+          node-version: 24
           registry-url: https://registry.npmjs.org/
-      # Ensure npm 11.5.1 or later is installed 
+      # Ensure npm 11.5.1 or later is installed, as trusted publishing (OIDC) needs it
       - run: npm install -g npm@latest
       - name: Bump version
         run: |
