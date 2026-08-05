@@ -14,7 +14,8 @@
     "lint": "oxlint",
     "validate": "tsgo --noEmit",
     "create-form": "bun run ./tools/create-form.ts",
-    "introspect-form": "bun run ./tools/introspect-form.ts"
+    "introspect-form": "bun run ./tools/introspect-form.ts",
+    "create-test-form": "bun run ./tools/create-test-form.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

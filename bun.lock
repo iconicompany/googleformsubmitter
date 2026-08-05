@@ -20,6 +20,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "playwright-core@1.61.1": "patches/playwright-core@1.61.1.patch",
+  },
   "packages": {
     "@google-cloud/local-auth": ["@google-cloud/local-auth@3.0.1", "", { "dependencies": { "arrify": "^2.0.1", "google-auth-library": "^9.0.0", "open": "^7.0.3", "server-destroy": "^1.0.1" } }, "sha512-YJ3GFbksfHyEarbVHPSCzhKpjbnlAhdzg2SEf79l6ODukrSM1qUOqfopY232Xkw26huKSndyzmJz+A6b2WYn7Q=="],
 

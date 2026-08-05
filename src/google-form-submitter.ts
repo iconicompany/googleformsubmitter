@@ -1,10 +1,12 @@
 import { chromium } from 'playwright';
+import type { Page } from 'playwright';
 import Ajv from 'ajv';
 import fs from 'fs/promises';
 import path from 'path';
 import type { FormSchemaMapping, SubmissionResult, GoogleAuthOptions } from './types';
 import { GoogleAuthService } from './google-auth-service';
 import { GoogleDriveService } from './google-drive-service';
+import { parseFormDefinition } from './form-definition';
 
 const ajv = new Ajv({ allErrors: true });
 
@@ -52,7 +54,7 @@ export class GoogleFormSubmitter {
   /**
    * Lazily loads and returns the resolved entryId mapping cache.
    * If cache file exists, reads it. Otherwise, launches Lightpanda CDP,
-   * scans the DOM, caches it, and closes the browser.
+   * reads the form definition, caches it, and closes the browser.
    */
   private async getOrResolveEntryIds(): Promise<Record<string, string>> {
     if (this.entryIdCache) {
@@ -70,7 +72,7 @@ export class GoogleFormSubmitter {
       console.log(`[GoogleFormSubmitter] Cache not found. Resolving entry IDs dynamically via Lightpanda...`);
     }
 
-    // 2. Launch browser to inspect DOM
+    // 2. Launch browser to read the form definition
     let browser;
     let context;
 
@@ -90,62 +92,29 @@ export class GoogleFormSubmitter {
     const page = await context.newPage();
 
     try {
-      await page.goto(this.formUrl);
-      // Wait for page load and check if form is closed
-      await this.checkClosedAndGetPage(page);
+      await this.openForm(page);
 
-      // Scan DOM for question containers
-      const domMappings = await page.evaluate(() => {
-        const result: Record<string, string> = {};
-        const containers = (globalThis as any).document.querySelectorAll('.Qr7Oae');
+      // Read the form's own definition rather than the rendered DOM: the DOM only ever holds the
+      // section currently on screen, so on a multi-section form everything past section 1 is
+      // invisible to a DOM scan — including forms whose first section is just an intro.
+      const definition = parseFormDefinition(await page.content());
 
-        containers.forEach((container: any) => {
-          const headerEl = container.querySelector('[role="heading"], .M7eMe, .HoRgec');
-          if (!headerEl) return;
+      const entryIdsByLabel: Record<string, string> = {};
+      for (const question of definition.questions) {
+        if (question.label) {
+          entryIdsByLabel[question.label] = question.entryId;
+        }
+      }
 
-          let labelText = (headerEl.textContent || '').trim();
-          // Remove trailing required asterisks and clean up whitespace
-          labelText = labelText.replace(/\s*\*$/, '').trim();
-
-          let entryId: string | null = null;
-
-          // Strategy A: Find hidden or text inputs with name entry.XXXX
-          const inputs = container.querySelectorAll('input[name^="entry."], textarea[name^="entry."]');
-          for (const input of inputs) {
-            const nameAttr = input.getAttribute('name');
-            if (nameAttr && nameAttr.startsWith('entry.')) {
-              entryId = nameAttr.replace('entry.', '').replace('_sentinel', '');
-              break;
-            }
-          }
-
-          // Strategy B: Parse data-params attribute in container or child elements
-          if (!entryId) {
-            const paramsEl = container.hasAttribute('data-params') ? container : container.querySelector('[data-params]');
-            if (paramsEl) {
-              const dataParams = paramsEl.getAttribute('data-params');
-              const match = dataParams?.match(/\[\[(\d+)/);
-              if (match && match[1]) {
-                entryId = match[1];
-              }
-            }
-          }
-
-          if (entryId) {
-            result[labelText] = entryId;
-          }
-        });
-
-        return result;
-      });
-
-      console.log(`[GoogleFormSubmitter] Discovered ${Object.keys(domMappings).length} fields in Form DOM.`);
+      console.log(
+        `[GoogleFormSubmitter] Discovered ${Object.keys(entryIdsByLabel).length} fields across ${definition.pageCount} section(s).`
+      );
 
       // 3. Map properties from mappingSchema to Google Forms entryIds
       const resolvedCache: Record<string, string> = {};
       for (const [propName, fieldMapping] of Object.entries(this.mappingSchema)) {
         // Find matching entryId by label
-        const matchedEntryId = domMappings[fieldMapping.label];
+        const matchedEntryId = entryIdsByLabel[fieldMapping.label];
         if (matchedEntryId) {
           resolvedCache[propName] = matchedEntryId;
         } else {
@@ -167,22 +136,26 @@ export class GoogleFormSubmitter {
   }
 
   /**
-   * Safe check to determine if the form is closed, throwing a clear error instead of timing out.
+   * Opens the form, throwing a clear error instead of timing out when it no longer accepts
+   * responses.
+   *
+   * Waits for the `form` element rather than a question container: on a form whose first section
+   * is an intro there are no question containers to wait for, and waiting for one burns the whole
+   * timeout before failing for the wrong reason.
    */
-  private async checkClosedAndGetPage(page: any): Promise<void> {
+  private async openForm(page: Page): Promise<void> {
+    await page.goto(this.formUrl);
+
     await Promise.any([
-      page.locator('.Qr7Oae').first().waitFor({ state: 'attached', timeout: 15000 }),
-      page.waitForURL(/\/closedform/, { timeout: 15000 }).catch(() => {})
+      page.locator('form').first().waitFor({ state: 'attached', timeout: 15000 }),
+      page.waitForURL(/\/closedform/, { timeout: 15000 })
     ]).catch(() => {});
 
-    const isClosed = page.url().includes('/closedform') || (await page.locator('form').count() === 0);
+    const isClosed =
+      page.url().includes('/closedform') || (await page.locator('form').count()) === 0;
 
     if (isClosed) {
       throw new Error('Google Form is closed (no longer accepting responses)');
-    }
-
-    if (await page.locator('.Qr7Oae').count() === 0) {
-      throw new Error('Could not find question containers on the page.');
     }
   }
 
@@ -280,8 +253,7 @@ export class GoogleFormSubmitter {
     const page = await context.newPage();
 
     try {
-      await page.goto(this.formUrl);
-      await this.checkClosedAndGetPage(page);
+      await this.openForm(page);
 
       console.log(`[GoogleFormSubmitter] Sending HTTP POST request in page context...`);
       const responseInfo = await page.evaluate(async ({ fieldsMap }) => {

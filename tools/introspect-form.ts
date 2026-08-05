@@ -2,6 +2,8 @@ import { chromium } from 'playwright';
 import fs from 'fs/promises';
 import path from 'path';
 
+import { parseFormDefinition } from '../src/form-definition';
+
 function toCamelCase(str: string): string {
   // Map common Russian terms to standard project English keys
   const translations: Record<string, string> = {
@@ -95,95 +97,26 @@ async function main() {
   try {
     await page.goto(url);
 
-    // Wait for the form contents to load
+    // Wait for the form itself, not for a question container: a form whose first section is just
+    // an intro has none, and waiting for one would burn the timeout and then blame the cookies.
     await Promise.any([
-      page.locator('.Qr7Oae').first().waitFor({ state: 'attached', timeout: 15000 }),
-      page.waitForURL(/\/closedform/, { timeout: 15000 }).catch(() => {})
+      page.locator('form').first().waitFor({ state: 'attached', timeout: 15000 }),
+      page.waitForURL(/\/closedform/, { timeout: 15000 })
     ]).catch(() => {});
 
     if (page.url().includes('/closedform') || (await page.locator('form').count() === 0)) {
       throw new Error('This Google Form is closed or redirecting to login. Make sure your session cookies are valid.');
     }
 
-    // Inspect DOM
-    const questions = await page.evaluate(() => {
-      const g = globalThis as any;
-      const result: any[] = [];
-      const containers = g.document.querySelectorAll('.Qr7Oae');
+    // Read the form's own definition: the DOM only holds the section currently on screen, so a
+    // scan of `/viewform` misses every question on a later section — all of them, when the first
+    // section is just an intro.
+    const definition = parseFormDefinition(await page.content());
+    const questions = definition.questions.filter((question) => question.label !== '');
 
-      containers.forEach((container: any) => {
-        const headerEl = container.querySelector('[role="heading"], .M7eMe, .HoRgec');
-        if (!headerEl) return;
-
-        let labelText = (headerEl.textContent || '').trim();
-        const isRequired = labelText.endsWith('*');
-        labelText = labelText.replace(/\s*\*$/, '').trim();
-
-        let type = 'text';
-        let choices: string[] = [];
-        let allowOther = false;
-
-        const paramsEl = container.hasAttribute('data-params') ? container : container.querySelector('[data-params]');
-        if (paramsEl) {
-          const dataParams = paramsEl.getAttribute('data-params');
-          try {
-            // Replace Google Forms prefix with '[' to restore the outer array opening bracket
-            const jsonText = dataParams.replace(/^%\.@\./, '[');
-            const parsed = JSON.parse(jsonText);
-            const questionInfo = parsed[0];
-            const typeId = questionInfo[3];
-            
-            if (typeId === 11 || typeId === 13) {
-              type = 'file';
-            } else if (typeId === 9) {
-              type = 'date';
-            } else if (typeId === 1) {
-              type = 'paragraph';
-            } else if (typeId === 2 || typeId === 3 || typeId === 4) {
-              type = 'choice';
-              const choicesArray = questionInfo[4]?.[0]?.[1];
-              if (choicesArray && Array.isArray(choicesArray)) {
-                choices = choicesArray.map((c: any) => c[0]).filter((val) => val !== null && val !== undefined && val !== '');
-              }
-              allowOther = !!questionInfo[4]?.[0]?.[2];
-            }
-          } catch (e: any) {
-            console.error('PAGE LOG [Parser Error]:', e.message, 'Data:', dataParams);
-            // Fallback to legacy DOM checks if parse fails
-            if (container.querySelector('[type="file"]') || container.querySelector('[data-params*="file"]')) {
-              type = 'file';
-            } else if (container.querySelector('input[type="date"]') || container.querySelector('[data-params*="[[3,"]')) {
-              type = 'date';
-            } else if (container.querySelector('[role="radio"], [role="checkbox"], select, .SGZTVe')) {
-              type = 'choice';
-              const optionEls = container.querySelectorAll('[role="radio"] + *, [role="checkbox"] + *, option, .fwW70c, .text');
-              optionEls.forEach((opt: any) => {
-                const text = (opt.textContent || '').trim();
-                if (text && !text.toLowerCase().includes('другое') && !text.toLowerCase().includes('other')) {
-                  choices.push(text);
-                }
-              });
-            } else if (container.querySelector('textarea')) {
-              type = 'paragraph';
-            }
-          }
-        } else {
-          console.warn('PAGE LOG: paramsEl not found for label:', labelText);
-        }
-
-        result.push({
-          label: labelText,
-          type,
-          required: isRequired,
-          choices: choices.length > 0 ? [...new Set(choices)] : undefined,
-          allowOther: allowOther || undefined
-        });
-      });
-
-      return result;
-    });
-
-    console.log(`\n🎉 Introspected ${questions.length} fields successfully. Generating schema objects...\n`);
+    console.log(
+      `\n🎉 Introspected ${questions.length} fields across ${definition.pageCount} section(s). Generating schema objects...\n`
+    );
 
     const jsonProperties: Record<string, any> = {};
     const jsonRequired: string[] = [];
