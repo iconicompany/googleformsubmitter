@@ -1,5 +1,7 @@
 import fs from 'fs/promises';
-import { google } from 'googleapis';
+// Узкий пакет вместо зонтичного `googleapis`: тот тянет весь каталог Google API — 206 МБ в
+// дереве потребителя, — а нужен один Drive (3 МБ). OAuth2 в нём тот же, из googleapis-common.
+import { auth as googleAuth } from '@googleapis/drive';
 import type { GoogleAuthOptions } from './types';
 
 export class GoogleAuthService {
@@ -19,7 +21,7 @@ export class GoogleAuthService {
     const refreshToken = this.authOptions?.refreshToken;
 
     if (clientId && clientSecret && refreshToken) {
-      const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+      const oauth2Client = new googleAuth.OAuth2(clientId, clientSecret);
       oauth2Client.setCredentials({ refresh_token: refreshToken });
       await oauth2Client.getAccessToken();
       return oauth2Client;
@@ -55,7 +57,7 @@ export class GoogleAuthService {
       );
     }
 
-    const oauth2Client = new google.auth.OAuth2(fileClientId, fileClientSecret);
+    const oauth2Client = new googleAuth.OAuth2(fileClientId, fileClientSecret);
     oauth2Client.setCredentials({ refresh_token: fileRefreshToken });
     
     await oauth2Client.getAccessToken();

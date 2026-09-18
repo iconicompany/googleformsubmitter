@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import process from 'process';
-import { google } from 'googleapis';
+import { auth as googleAuth, forms as formsApi } from '@googleapis/forms';
 import { authenticate } from '@google-cloud/local-auth';
 
 // Helper to check if file exists
@@ -46,7 +46,7 @@ async function loadSavedCredentialsIfExist(tokenPath: string) {
     const content = await fs.readFile(tokenPath, 'utf-8');
     const credentials = JSON.parse(content);
     
-    const oauth2Client = new google.auth.OAuth2(
+    const oauth2Client = new googleAuth.OAuth2(
       credentials.client_id,
       credentials.client_secret
     );
@@ -89,7 +89,7 @@ async function authorize(credentialsPath: string, tokenPath: string) {
   const content = await fs.readFile(credentialsPath, 'utf-8');
   const keys = JSON.parse(content);
   const key = keys.installed || keys.web;
-  const oauth2Client = new google.auth.OAuth2(
+  const oauth2Client = new googleAuth.OAuth2(
     key.client_id,
     key.client_secret,
     key.redirect_uris?.[0]
@@ -108,7 +108,7 @@ async function main() {
   });
 
   const auth = await authorize(credentialsPath, tokenPath);
-  const forms = google.forms({ version: 'v1', auth });
+  const forms = formsApi({ version: 'v1', auth });
 
   console.log('Creating new Google Form...');
   const formRes = await forms.forms.create({

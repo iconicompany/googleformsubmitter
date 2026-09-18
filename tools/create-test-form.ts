@@ -12,16 +12,15 @@ import path from 'path';
 import process from 'process';
 
 import { authenticate } from '@google-cloud/local-auth';
-import { google } from 'googleapis';
-import type { forms_v1 } from 'googleapis';
+import { auth as googleAuth, forms as formsApi, type forms_v1 } from '@googleapis/forms';
 
 const SCOPES = ['https://www.googleapis.com/auth/forms.body', 'https://www.googleapis.com/auth/drive'];
 
 /**
- * `googleapis` bundles its own copy of google-auth-library, so the client must come from
- * `google.auth` — a client imported from the top-level copy is a different, incompatible type.
+ * `@googleapis/forms` bundles its own copy of google-auth-library, so the client must come from
+ * its `auth` export — a client imported from the top-level copy is a different, incompatible type.
  */
-type FormsAuthClient = InstanceType<typeof google.auth.OAuth2>;
+type FormsAuthClient = InstanceType<typeof googleAuth.OAuth2>;
 
 type FormMode = 'multi' | 'single';
 
@@ -50,7 +49,7 @@ async function readClientKey(credentialsPath: string): Promise<ClientKey> {
 async function loadSavedToken(tokenPath: string): Promise<FormsAuthClient | null> {
   try {
     const saved = JSON.parse(await fs.readFile(tokenPath, 'utf-8')) as SavedToken;
-    const client = new google.auth.OAuth2(saved.client_id, saved.client_secret);
+    const client = new googleAuth.OAuth2(saved.client_id, saved.client_secret);
     client.setCredentials({ refresh_token: saved.refresh_token });
     // Prove the token still works: a revoked refresh token only fails on use.
     await client.getAccessToken();
@@ -86,7 +85,7 @@ async function authorize(credentialsPath: string, tokenPath: string): Promise<Fo
     console.log(`Saved the refresh token to ${tokenPath}`);
   }
 
-  const client = new google.auth.OAuth2(key.client_id, key.client_secret, key.redirect_uris?.[0]);
+  const client = new googleAuth.OAuth2(key.client_id, key.client_secret, key.redirect_uris?.[0]);
   client.setCredentials({
     refresh_token: refreshToken ?? undefined,
     access_token: consented.credentials.access_token ?? undefined,
@@ -213,7 +212,7 @@ async function main(): Promise<void> {
   });
 
   const auth = await authorize(credentialsPath, tokenPath);
-  const forms = google.forms({ version: 'v1', auth });
+  const forms = formsApi({ version: 'v1', auth });
 
   const created = await forms.forms.create({
     requestBody: {

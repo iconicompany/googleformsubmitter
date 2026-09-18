@@ -1,4 +1,4 @@
-import { google } from 'googleapis';
+import { drive as driveApi } from '@googleapis/drive';
 import { Readable } from 'stream';
 import type { GoogleAuthService } from './google-auth-service';
 
@@ -14,7 +14,7 @@ export class GoogleDriveService {
    */
   public async uploadFile(filename: string, mimeType: string, buffer: Buffer): Promise<string> {
     const auth = await this.authService.getGoogleAuthClient();
-    const drive = google.drive({ version: 'v3', auth });
+    const drive = driveApi({ version: 'v3', auth });
     
     const response = await drive.files.create({
       requestBody: {
